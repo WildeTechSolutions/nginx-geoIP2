@@ -1,0 +1,62 @@
+services:
+  nginx:
+    build: .
+    container_name: nginx
+    network_mode: "host"
+    volumes:
+      # conf files
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      # SSL certs
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+      # logs
+      - ./data/nginx/logs:/var/log/nginx
+      # optional confs
+      # - ./websocket.conf:/etc/nginx/conf.d/websocket.conf             # Easy websocket config
+      # - ./global.conf:/etc/nginx/conf.d/global.conf                   # Global settings
+      # - ./real_ip_from_cf.conf:/etc/nginx/conf.d/real_ip_from_cf.conf # for hosts behind Cloudflare Tunnel
+      # - ./hsts.conf:/etc/nginx/conf.d/hsts.conf                       # HTTP Strict Transport Security (HSTS)
+      - ./conf.d:/etc/nginx/conf.d
+      # GeoIP database location
+      - ./data/geoip2:/usr/share/GeoIP
+#    command: >
+#      /bin/sh -c "apk add --no-cache nginx-mod-http-geoip2=1.26.3-r1 && nginx -g 'daemon off;'"
+# if not running on host network, expose ports      
+#    ports:
+#      - "80:80"
+#      - "443:443"
+    depends_on:
+      - certbot
+      - geoip-updater
+
+  geoip-updater:
+    image: maxmindinc/geoipupdate:latest
+    container_name: geoip-updater
+    volumes:
+      - ./data/geoip2:/usr/share/GeoIP
+    environment:
+      GEOIPUPDATE_ACCOUNT_ID: ${GEOIP_ACCOUNT_ID}
+      GEOIPUPDATE_LICENSE_KEY: ${GEOIP_LICENSE_KEY}
+      GEOIPUPDATE_EDITION_IDS: ${GEOIP_EDITION_IDS}
+    restart: on-failure
+
+  certbot:
+    image: certbot/dns-cloudflare  # Certbot with Cloudflare DNS plugin
+    container_name: certbot
+    network_mode: "host"
+    volumes:
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+      - ./cloudflare.ini:/etc/letsencrypt/cloudflare.ini  # Cloudflare credentials
+    entrypoint: >
+      /bin/sh -c "
+      certbot certonly --non-interactive --quiet --dns-cloudflare --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
+      --email ${EMAIL} --agree-tos --no-eff-email --expand \
+      --domains ${DOMAINS};
+
+      while :; do 
+        certbot renew --non-interactive --dns-cloudflare --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini;
+        sleep 24h;
+      done"
+
+
